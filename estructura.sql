@@ -137,83 +137,64 @@ WHERE precio IS NULL
    OR fecha IS NULL 
    OR TRIM(fecha) = '';
 
-
--- 2. Limpieza, conversión de tipos (CAST) y gestión de nulos con COALESCE
--- Transformamos los campos TEXT en tipos numéricos y de fecha reales, 
--- aplicando COALESCE para asignar valores por defecto en caso de nulos.
-SELECT 
-    id,
-    numero,
-    cliente_id,
-    producto_id
+-- Visualización de la transformación-- 
+SELECT  
+    estado AS estado_original,
+    LOWER(TRIM(estado)) AS estado_limpio
 FROM pedidos;
-    
-    -- Limpieza de precio: elimina símbolos, espacios, convierte comas a puntos y hace CAST a NUMERIC.
-    -- Si es nulo o texto inválido, COALESCE asigna un valor por defecto (ej. 0.00).
-   SELECT 
-    precio AS precio_original,
-    COALESCE(
+-- Auditoría y detección de errores-- 
+SELECT id, numero, estado 
+FROM pedidos 
+WHERE estado IS NOT NULL 
+  AND (estado != TRIM(estado) OR estado != LOWER(estado));
+
+--Procesamiento de información y limpieza consistente de datos-- 
+UPDATE pedidos
+SET 
+    -- 1. Limpieza de Precio
+    precio = COALESCE(
         CASE 
             WHEN precio IS NULL OR TRIM(precio) = '' OR precio ~ '[A-Za-z]' OR precio = 'consultar' THEN NULL
-            ELSE REPLACE(REPLACE(REPLACE(TRIM(precio), '$', ''), ' ', ''), ',', '.')::NUMERIC
+            ELSE REPLACE(REPLACE(REPLACE(TRIM(precio), '$', ''), ' ', ''), ',', '.')
         END, 
-        0.00
-    ) AS precio_limpio
-FROM pedidos;
-    -- Limpieza de cantidad: traduce texto a número y convierte a INTEGER, manejando nulos.
-   SELECT 
-    cantidad AS cantidad_original,
-    COALESCE(
+        '0.00'
+    ),
+    
+    -- 2. Limpieza de Cantidad: convierte a entero positivo con ABS y reemplaza nulos/inválidos por 1
+    cantidad = COALESCE(
         CASE 
-            WHEN cantidad = 'dos' THEN 2
+            WHEN cantidad = 'dos' THEN '2'
             WHEN cantidad IS NULL OR TRIM(cantidad) = '' OR cantidad ~ '[A-Za-z]' THEN NULL
-            ELSE TRIM(cantidad)::INTEGER
+            ELSE ABS(TRIM(cantidad)::INTEGER)::TEXT
         END, 
-        1
-    ) AS cantidad_limpia
-FROM pedidos;
-    -- Limpieza de fechas: valida formatos y convierte de TEXT a DATE de forma segura.
-  SELECT 
-    fecha AS fecha_original,
-    CASE 
-        -- 1. Si es nulo, vacío, tiene letras o dice "sin fecha", lo descartamos
-        WHEN fecha IS NULL OR TRIM(fecha) = '' OR fecha ~ '[A-Za-z]' OR fecha = 'sin fecha' THEN NULL
-        
-        -- 2. Si viene en formato local DD/MM/YYYY
-        WHEN fecha LIKE '__/__/____' THEN TO_DATE(fecha, 'DD/MM/YYYY')
-        
-        -- 3. Si viene en formato YYYY-MM-DD, validamos que el mes (1-12) y el día (1-31) sean lógicos antes de convertir
-        WHEN fecha ~ '^\d{4}-\d{2}-\d{2}$' 
-             AND SUBSTRING(fecha, 6, 2)::INT BETWEEN 1 AND 12 
-             AND SUBSTRING(fecha, 9, 2)::INT BETWEEN 1 AND 31 
-        THEN fecha::DATE
-        
-        -- 4. Cualquier otra cosa extraña o fecha imposible (como la 2026-13-45) cae aquí y se vuelve NULL de forma segura
-        ELSE NULL
-    END AS fecha_limpia
-FROM pedidos;
+        '1'
+    ),
+    
+    -- 3. Limpieza de Fecha: si es inválida/nula, asigna la fecha de hoy
+    fecha = COALESCE(
+        CASE 
+            WHEN fecha IS NULL OR TRIM(fecha) = '' OR fecha ~ '[A-Za-z]' OR fecha = 'sin fecha' THEN NULL
+            WHEN fecha LIKE '_//_' THEN TO_CHAR(TO_DATE(fecha, 'DD/MM/YYYY'), 'YYYY-MM-DD')
+            WHEN fecha ~ '^\d{4}-\d{2}-\d{2}$' 
+                 AND SUBSTRING(fecha, 6, 2)::INT BETWEEN 1 AND 12 
+                 AND SUBSTRING(fecha, 9, 2)::INT BETWEEN 1 AND 31 
+            THEN fecha
+            ELSE NULL
+        END,
+        TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
+    ),
 
--- Top 5 clientes por gasto total-- 
-SELECT 
+    -- 4. Limpieza de Estado: limpia espacios/mayúsculas y asigna 'pendiente' si está vacío/nulo
+    estado = COALESCE(
+        NULLIF(LOWER(TRIM(estado)), ''), 
+        'pendiente'
+    );
+    
+    -- Top 5 clientes por gasto total--
+    SELECT 
     c.id AS cliente_id,
     c.nombre || ' ' || c.apellido AS cliente_nombre,
-    SUM(
-        COALESCE(
-            CASE 
-                WHEN p.precio IS NULL OR TRIM(p.precio) = '' OR p.precio ~ '[A-Za-z]' OR p.precio = 'consultar' THEN NULL
-                ELSE REPLACE(REPLACE(REPLACE(TRIM(p.precio), '$', ''), ' ', ''), ',', '.')::NUMERIC
-            END, 
-            0.00
-        ) * 
-        COALESCE(
-            CASE 
-                WHEN p.cantidad = 'dos' THEN 2
-                WHEN p.cantidad IS NULL OR TRIM(p.cantidad) = '' OR p.cantidad ~ '[A-Za-z]' THEN NULL
-                ELSE TRIM(p.cantidad)::INTEGER
-            END, 
-            1
-        )
-    ) AS gasto_total
+    SUM(p.precio::NUMERIC * p.cantidad::INTEGER) AS gasto_total
 FROM clientes c
 JOIN pedidos p ON c.id = p.cliente_id
 GROUP BY c.id, c.nombre, c.apellido
@@ -221,43 +202,12 @@ ORDER BY gasto_total DESC
 LIMIT 5;
 
 --Ventas totales por mes (Funciones de fecha)--
-WITH pedidos_por_mes AS (
-    SELECT 
-        TO_CHAR(
-            CASE 
-                WHEN p.fecha IS NULL OR TRIM(p.fecha) = '' OR p.fecha ~ '[A-Za-z]' OR p.fecha = 'sin fecha' THEN NULL
-                WHEN p.fecha LIKE '__/__/____' THEN TO_DATE(p.fecha, 'DD/MM/YYYY')
-                WHEN p.fecha ~ '^\d{4}-\d{2}-\d{2}$' 
-                     AND SUBSTRING(p.fecha, 6, 2)::INT BETWEEN 1 AND 12 
-                     AND SUBSTRING(p.fecha, 9, 2)::INT BETWEEN 1 AND 31 
-                THEN p.fecha::DATE
-                ELSE NULL
-            END, 
-            'YYYY-MM'
-        ) AS anio_mes,
-        COALESCE(
-            CASE 
-                WHEN p.precio IS NULL OR TRIM(p.precio) = '' OR p.precio ~ '[A-Za-z]' OR p.precio = 'consultar' THEN NULL
-                ELSE REPLACE(REPLACE(REPLACE(TRIM(p.precio), '$', ''), ' ', ''), ',', '.')::NUMERIC
-            END, 
-            0.00
-        ) * 
-        COALESCE(
-            CASE 
-                WHEN p.cantidad = 'dos' THEN 2
-                WHEN p.cantidad IS NULL OR TRIM(p.cantidad) = '' OR p.cantidad ~ '[A-Za-z]' THEN NULL
-                ELSE TRIM(p.cantidad)::INTEGER
-            END, 
-            1
-        ) AS subtotal
-    FROM pedidos p
-)
 SELECT 
-    anio_mes,
-    SUM(subtotal) AS ventas_totales
-FROM pedidos_por_mes
-WHERE anio_mes IS NOT NULL
-GROUP BY anio_mes
+    TO_CHAR(fecha::DATE, 'YYYY-MM') AS anio_mes,
+    SUM(precio::NUMERIC * cantidad::INTEGER) AS ventas_totales
+FROM pedidos
+WHERE fecha IS NOT NULL AND fecha != ''
+GROUP BY TO_CHAR(fecha::DATE, 'YYYY-MM')
 ORDER BY anio_mes;
 
 --Los 3 productos menos vendidos--
@@ -265,16 +215,7 @@ SELECT
     pr.id AS producto_id,
     pr.nombre AS producto_nombre,
     pr.categoria,
-    COALESCE(SUM(
-        COALESCE(
-            CASE 
-                WHEN p.cantidad = 'dos' THEN 2
-                WHEN p.cantidad IS NULL OR TRIM(p.cantidad) = '' OR p.cantidad ~ '[A-Za-z]' THEN NULL
-                ELSE TRIM(p.cantidad)::INTEGER
-            END, 
-            1
-        )
-    ), 0) AS total_unidades_vendidas
+    COALESCE(SUM(p.cantidad::INTEGER), 0) AS total_unidades_vendidas
 FROM productos pr
 LEFT JOIN pedidos p ON pr.id = p.producto_id
 GROUP BY pr.id, pr.nombre, pr.categoria
@@ -282,66 +223,27 @@ ORDER BY total_unidades_vendidas ASC
 LIMIT 3;
 
 --Ranking de pedidos por categoría con RANK() (Window Function)--
-
-WITH pedidos_calculados AS (
-    SELECT 
-        pr.categoria,
-        p.numero AS numero_pedido,
-        pr.nombre AS producto,
-        COALESCE(
-            CASE 
-                WHEN p.precio IS NULL OR TRIM(p.precio) = '' OR p.precio ~ '[A-Za-z]' OR p.precio = 'consultar' THEN NULL
-                ELSE REPLACE(REPLACE(REPLACE(TRIM(p.precio), '$', ''), ' ', ''), ',', '.')::NUMERIC
-            END, 
-            0.00
-        ) * 
-        COALESCE(
-            CASE 
-                WHEN p.cantidad = 'dos' THEN 2
-                WHEN p.cantidad IS NULL OR TRIM(p.cantidad) = '' OR p.cantidad ~ '[A-Za-z]' THEN NULL
-                ELSE TRIM(p.cantidad)::INTEGER
-            END, 
-            1
-        ) AS monto_total_pedido
-    FROM pedidos p
-    JOIN productos pr ON p.producto_id = pr.id
-)
 SELECT 
-    categoria,
-    numero_pedido,
-    producto,
-    monto_total_pedido,
-    RANK() OVER (PARTITION BY categoria ORDER BY monto_total_pedido DESC) AS ranking_en_categoria
-FROM pedidos_calculados;
+    pr.categoria,
+    p.numero AS numero_pedido,
+    pr.nombre AS producto,
+    (p.precio::NUMERIC * p.cantidad::INTEGER) AS monto_total_pedido,
+    RANK() OVER (
+        PARTITION BY pr.categoria 
+        ORDER BY (p.precio::NUMERIC * p.cantidad::INTEGER) DESC
+    ) AS ranking_en_categoria
+FROM pedidos p
+JOIN productos pr ON p.producto_id = pr.id;
 
--- Calculamos el ticket promedio por categoría para entender qué tipo de productos 
+Calculamos el ticket promedio por categoría para entender qué tipo de productos 
 -- generan transacciones de mayor valor y enfocar las campañas comerciales de los agentes.
-WITH detalle_transacciones AS (
-    SELECT 
-        pr.categoria,
-        p.numero AS numero_pedido,
-        COALESCE(
-            CASE 
-                WHEN p.precio IS NULL OR TRIM(p.precio) = '' OR p.precio ~ '[A-Za-z]' OR p.precio = 'consultar' THEN NULL
-                ELSE REPLACE(REPLACE(REPLACE(TRIM(p.precio), '$', ''), ' ', ''), ',', '.')::NUMERIC
-            END, 
-            0.00
-        ) * 
-        COALESCE(
-            CASE 
-                WHEN p.cantidad = 'dos' THEN 2
-                WHEN p.cantidad IS NULL OR TRIM(p.cantidad) = '' OR p.cantidad ~ '[A-Za-z]' THEN NULL
-                ELSE TRIM(p.cantidad)::INTEGER
-            END, 
-            1
-        ) AS monto_total
-    FROM pedidos p
-    JOIN productos pr ON p.producto_id = pr.id
-)
+
 SELECT 
-    categoria,
-    ROUND(AVG(monto_total), 2) AS ticket_promedio,
-    COUNT(numero_pedido) AS cantidad_pedidos_asociados
-FROM detalle_transacciones
-GROUP BY categoria
+    pr.categoria,
+    ROUND(AVG(p.precio::NUMERIC * p.cantidad::INTEGER), 2) AS ticket_promedio,
+    COUNT(p.numero) AS cantidad_pedidos_asociados
+FROM pedidos p
+JOIN productos pr ON p.producto_id = pr.id
+GROUP BY pr.categoria
 ORDER BY ticket_promedio DESC;
+
