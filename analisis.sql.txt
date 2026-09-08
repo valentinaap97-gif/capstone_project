@@ -1,0 +1,75 @@
+analisis.sql
+
+1. Resumen Ejecutivo y Propósito del Proyecto
+Este documento constituye la base de análisis integral del proyecto de ingeniería de datos desarrollado en
+PostgreSQL y gestionado desde DBeaver. El propósito central de la iniciativa consistió en estructurar un
+modelo relacional robusto para un entorno de comercio electrónico, enfrentando el desafío crítico del
+procesamiento y saneamiento de datos transaccionales con anomalías severas.
+A través de la aplicación de técnicas avanzadas de transformación, control de integridad referencial y
+consultas analíticas complejas, el proyecto demuestra la transición exitosa desde datos crudos e
+inconsistentes hacia información estructurada y apta para la toma de decisiones estratégicas (Business
+Intelligence).
+2. Arquitectura de Datos y Modelado Estructural
+El esquema relacional se compone de tres entidades fundamentales diseñadas bajo estrictas normas de
+integridad:
+
+. Tabla clientes (Entidad Maestra)
+Administra la información demográfica y de contacto de la base de compradores. Incorpora restricciones de
+unicidad en documentos, control de estados de actividad (activo BOOLEAN) y marcas de tiempo
+automatizadas con control de creación y actualización.
+
+. Tabla productos (Catálogo Comercial)
+Almacena el inventario organizado por categorías (tecnología, oficina, accesorios). Implementa tipos de datos
+numéricos precisos (NUMERIC(12,2)) para evitar errores de redondeo monetario y controla niveles de stock
+en tiempo real.
+
+. Tabla pedidos (Entidad Transaccional e Historial de Anomalías)
+Diseñada intencionalmente con tipos de datos de texto abierto (TEXT) en columnas críticas para simular
+escenarios reales de "datos sucios" provenientes de cargas erróneas, integraciones deficientes o ingresos
+manuales desestructurados.
+
+3. Estrategia de Auditoría y Data Cleaning (Persistencia)
+Para resolver la problemática de los datos corruptos sin comprometer la integridad operacional, se
+implementó un pipeline de limpieza estructurado en dos fases rigurosas:
+Fase de Auditoría Analítica: Identificación previa mediante consultas de diagnóstico (SELECT con
+funciones condicionales y expresiones regulares) para cuantificar registros nulos, espacios vacíos,
+formatos locales y desajustes de dominio.
+Fase de Persistencia y Transformación (UPDATE Masivo): Ejecución de funciones de manipulación de
+cadenas (TRIM, LOWER, REPLACE), validaciones lógicas mediante expresiones regulares (~), cascos de
+conversión segura (::INTEGER, ::NUMERIC) y el uso estratégico de COALESCE para garantizar valores
+por defecto robustos ante fallos críticos.
+
+Resultado del Saneamiento: Estandarización de precios a formato numérico puro, corrección de cantidades
+
+negativas o literales (ej. 'dos' a 2), conversión de fechas locales (DD/MM/YYYY) al estándar ISO (YYYY-MM-
+DD) y normalización estricta de estados transaccionales.
+
+4. Capa de Analítica de Negocio y Business Intelligence
+Una vez asegurada la consistencia de los datos, se desarrollaron consultas analíticas de alto valor comercial
+para responder a preguntas clave del negocio:
+Métrica / Reporte : Top 5 Clientes
+Técnica SQL Aplicada: JOIN, GROUP BY, SUM, ORDER BY DESC
+Objetivo Comercial: Identificar cuentas de alto valor para programas de fidelización.
+
+Métrica / Reporte : Ventas por Mes 
+Técnica SQL Aplicada: TO_CHAR (Extracción temporal), Agregación
+Objetivo Comercial: Detectar estacionalidad y tendencias de facturación a lo largo del tiempo.
+
+Métrica / Reporte : Rotación de Inventario
+Técnica SQL Aplicada: LEFT JOIN, COALESCE, Ordenamiento ascendente
+Objetivo Comercial: Detectar los 3 productos con menor salida comercial para optimizar stock.
+
+Métrica / Reporte :Ranking por Categoría
+Técnica SQL Aplicada: Funciones de Ventana (RANK() OVER (PARTITION BY...))
+Objetivo Comercial:  Jerarquizar transacciones de mayor volumen dentro de cada sector.
+
+Métrica / Reporte : Ticket Promedio 
+Técnica SQL Aplicada: AVG, ROUND, Agrupación por categoría
+Objetivo Comercial: Evaluar el poder adquisitivo y el valor monetario medio por segmento.
+
+5. Conclusiones y Próximos Pasos
+El proyecto demuestra una sólida competencia en la gestión de bases de datos relacionales, abarcando
+desde el diseño DDL inicial hasta el procesamiento avanzado de datos y la explotación analítica. Como
+evolución futura, se recomienda la implementación de restricciones de clave foránea definitivas (FOREIGN
+KEY) en la tabla pedidos y la automatización del pipeline mediante procedimientos almacenados o triggers
+en PostgreSQL.
